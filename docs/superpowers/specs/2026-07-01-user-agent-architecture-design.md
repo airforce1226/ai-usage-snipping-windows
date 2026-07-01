@@ -38,7 +38,7 @@ A machine-level Windows Service is explicitly excluded. Service accounts do not 
 
 ## 3. Startup and lifetime
 
-The first App launch starts the Agent, waits up to five seconds for IPC readiness, and then performs onboarding. After the user enables automatic collection, MSIX `StartupTask` starts only the Agent at subsequent logons.
+The first App launch starts the non-elevated Agent, waits up to five seconds for IPC readiness, and then performs onboarding. Automatic collection is an explicit user opt-in: only after the user enables it does the MSIX `StartupTask` start the Agent at subsequent logons. The StartupTask is not enabled by default.
 
 The Agent uses a named mutex containing the current Windows user SID. A second Agent instance detects the mutex and exits with code `10`. The mutex name and pipe name include an application protocol major version so incompatible side-by-side development builds do not connect accidentally.
 
@@ -50,7 +50,7 @@ Pausing collection stops watchers and scheduled reconciliation but leaves IPC, s
 
 Use local named pipes. The server pipe name is `AIUsageMonitor.Agent.v1.{userSidHash}`. The raw SID is not exposed in logs; the pipe suffix is the first 16 lowercase hexadecimal characters of SHA-256 over the SID string.
 
-Pipe access is limited to the current user SID and LocalSystem. Remote clients are rejected. The server accepts multiple sequential clients and processes at most eight concurrent requests.
+Both server and clients create their pipe streams with `PipeOptions.CurrentUserOnly`. This restricts IPC to processes running as the same current interactive Windows user and also protects clients from connecting to a pipe name pre-created by another user. The design does not claim a separate, categorical remote-client rejection guarantee beyond the behavior supplied by `CurrentUserOnly`; any stronger guarantee requires an implemented and tested transport control. The server accepts multiple sequential clients and processes at most eight concurrent requests.
 
 Frames use a four-byte little-endian payload length followed by UTF-8 JSON. Maximum JSON payload length is 1,048,576 bytes. Both client and server reject zero-length, oversized, truncated, invalid UTF-8, and malformed JSON frames.
 
@@ -96,6 +96,8 @@ App connection sequence:
 
 The App may automatically restart a crashed Agent at most three times in ten minutes. Further failures require explicit user action and expose redacted diagnostics.
 
+App, Agent, and CLI all run non-elevated. An elevated/non-elevated token mismatch is outside the supported IPC topology; when it prevents a connection, App enters its offline/degraded experience and CLI follows its read-only fallback rather than elevating either process.
+
 The CLI attempts one 500 ms IPC connection. If unavailable, it opens the active profile database with `Mode=ReadOnly;Cache=Shared`. Commands that require mutation fail with exit code `5` and error `agent_unavailable`.
 
 ## 6. Agent status model
@@ -131,7 +133,8 @@ Before an update, the App sends `agent.shutdown`, waits up to 15 seconds, and on
 ## 8. Security and privacy
 
 - The Agent runs with ordinary interactive-user permissions and never elevates.
-- Pipe ACLs authorize only the current SID and LocalSystem.
+- Server and client named-pipe streams use `PipeOptions.CurrentUserOnly`; LocalSystem is not separately authorized.
+- App, Agent, and CLI run non-elevated. Elevation mismatch is handled as Agent unavailability, never by privilege escalation.
 - App, Agent, and CLI validate protocol version, command type, payload size, and JSON shape.
 - Requests cannot contain arbitrary SQL or filesystem paths except paths validated by the settings/profile layer.
 - Logs never include raw SID, prompt/response content, credentials, pipe payloads, or unredacted project paths.
@@ -150,7 +153,7 @@ App retains the last valid view model and labels it with the last update timesta
 
 - A second Agent instance exits while the first remains healthy.
 - The mutex and pipe names differ between simulated user SIDs.
-- Current-user IPC succeeds and an unauthorized identity is rejected in an integration environment.
+- Current-user IPC succeeds, a different-user identity cannot use the endpoint in an integration environment, and client-side `CurrentUserOnly` prevents cross-user pipe-name squatting.
 - Valid, malformed, oversized, truncated, unknown-command, and unsupported-version frames behave as specified.
 - Request cancellation and client disconnect do not leak server tasks.
 - Closing App leaves Agent collection running.
@@ -159,7 +162,7 @@ App retains the last valid view model and labels it with the last update timesta
 - Deadline shutdown retains the last committed checkpoint and recovers on restart.
 - App connection retry and three-restarts-per-ten-minutes policy are deterministic under a fake clock.
 - CLI uses IPC when available and read-only fallback when unavailable.
-- StartupTask enable/disable, package update, x64, and ARM64 behavior pass on clean Windows 11 VMs.
+- StartupTask opt-in enable/disable, package update, and native SQLite behavior pass for explicit `win-x64` and `win-arm64` publish/bundle outputs on clean Windows 11 VMs.
 
 ## 11. Repository changes
 
@@ -169,6 +172,7 @@ Add these projects:
 - `src/AIUsageMonitor.Ipc/AIUsageMonitor.Ipc.csproj`
 - `tests/AIUsageMonitor.Agent.Tests/AIUsageMonitor.Agent.Tests.csproj`
 - `tests/AIUsageMonitor.Ipc.Tests/AIUsageMonitor.Ipc.Tests.csproj`
+- a Windows Application Packaging Project that produces the MSIX bundle and declares the opt-in `StartupTask`
 
 `AIUsageMonitor.Ipc` contains contracts, framing, pipe-name derivation, client, and server transport. It depends only on `AIUsageMonitor.Core`. Agent depends on Core, Infrastructure, and IPC. App depends on Core, HUD, and IPC; it does not reference Infrastructure after the transition. CLI depends on Core, Infrastructure for read-only fallback, and IPC.
 

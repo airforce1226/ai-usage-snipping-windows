@@ -12,7 +12,9 @@
 
 - Windows 11 23H2 or later; x64 and ARM64.
 - Agent runs with ordinary interactive-user permissions and never elevates.
-- Pipe ACL authorizes only the current user SID and LocalSystem.
+- App, Agent, and CLI run non-elevated. Elevation/token mismatch results in offline/degraded or read-only fallback behavior; no component elevates to reconnect.
+- Both server and client pipe streams use `PipeOptions.CurrentUserOnly`; LocalSystem is not separately authorized.
+- Do not claim categorical remote rejection unless an additional control is implemented and tested.
 - Protocol version is integer `1`; maximum JSON payload is exactly `1,048,576` bytes.
 - Frame format is four-byte little-endian payload length followed by UTF-8 JSON.
 - App never starts watchers or opens a write-capable SQLite connection.
@@ -23,7 +25,7 @@
 
 ---
 
-### Task 1: IPC contracts and bounded framing
+### Task 1: IPC contracts and bounded framing (completed concept)
 
 **Files:**
 - Create: `src/AIUsageMonitor.Ipc/AIUsageMonitor.Ipc.csproj`
@@ -40,7 +42,7 @@
 - Produces: `IpcResponse(int ProtocolVersion, string RequestId, string Type, JsonElement? Payload, IpcError? Error)`.
 - Produces: `IpcFrameCodec.WriteAsync<T>(Stream, T, CancellationToken)` and `ReadAsync<T>(Stream, CancellationToken)`.
 
-- [ ] **Step 1: Create projects and references**
+- [x] **Step 1: Create projects and references**
 
 ```powershell
 dotnet new classlib -n AIUsageMonitor.Ipc -o src/AIUsageMonitor.Ipc -f net8.0
@@ -48,23 +50,24 @@ dotnet new xunit -n AIUsageMonitor.Ipc.Tests -o tests/AIUsageMonitor.Ipc.Tests -
 dotnet sln AIUsageMonitor.sln add src/AIUsageMonitor.Ipc/AIUsageMonitor.Ipc.csproj tests/AIUsageMonitor.Ipc.Tests/AIUsageMonitor.Ipc.Tests.csproj
 dotnet add src/AIUsageMonitor.Ipc/AIUsageMonitor.Ipc.csproj reference src/AIUsageMonitor.Core/AIUsageMonitor.Core.csproj
 dotnet add tests/AIUsageMonitor.Ipc.Tests/AIUsageMonitor.Ipc.Tests.csproj reference src/AIUsageMonitor.Ipc/AIUsageMonitor.Ipc.csproj
+dotnet restore AIUsageMonitor.sln
 ```
 
-- [ ] **Step 2: Write failing framing tests**
+- [x] **Step 2: Write failing framing tests**
 
 Tests must round-trip a request through `MemoryStream`, reject zero length, reject `1_048_577`, reject truncated payloads, and reject malformed UTF-8. The oversized test writes `BitConverter.GetBytes(1_048_577)` followed by no payload and expects `InvalidDataException` containing `maximum`.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Run: `dotnet test tests/AIUsageMonitor.Ipc.Tests -c Release --no-restore`
 
 Expected: compilation fails because `IpcFrameCodec` and contract records do not exist.
 
-- [ ] **Step 4: Implement contracts and codec**
+- [x] **Step 4: Implement contracts and codec**
 
 Use `BinaryPrimitives.WriteInt32LittleEndian`, `ReadExactlyAsync`, strict `UTF8Encoding(false, true)`, and `JsonSerializer`. Validate length before allocating. `WriteAsync` serializes to UTF-8 bytes, rejects payloads outside `1..1_048_576`, writes prefix then payload, and flushes. `ReadAsync` reads exactly four bytes, validates, rents from `ArrayPool<byte>`, reads exactly the declared bytes, decodes strict UTF-8, deserializes, and returns the rented buffer in `finally`.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```powershell
 dotnet test tests/AIUsageMonitor.Ipc.Tests -c Release --no-restore
@@ -74,7 +77,7 @@ git commit -m "feat: define bounded IPC protocol"
 
 Expected: all IPC codec tests pass.
 
-### Task 2: User-scoped pipe and mutex identity
+### Task 2: User-scoped pipe and mutex identity (completed concept)
 
 **Files:**
 - Create: `src/AIUsageMonitor.Ipc/Security/UserEndpointIdentity.cs`
@@ -86,21 +89,21 @@ Expected: all IPC codec tests pass.
 - Produces: `UserEndpointIdentity.Create(string sid, int protocolMajor)` returning `PipeName` and `MutexName`.
 - Produces: `ICurrentUserIdentity.GetSid()`.
 
-- [ ] **Step 1: Write failing deterministic identity tests**
+- [x] **Step 1: Write failing deterministic identity tests**
 
 Use SID strings `S-1-5-21-100-200-300-1001` and `S-1-5-21-100-200-300-1002`. Assert equal SID/version gives equal names, different SID gives different names, and the raw SID is absent. Assert pipe matches `^AIUsageMonitor\.Agent\.v1\.[0-9a-f]{16}$`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run: `dotnet test tests/AIUsageMonitor.Ipc.Tests --filter FullyQualifiedName~UserEndpointIdentityTests -c Release --no-restore`
 
 Expected: compilation fails for missing identity types.
 
-- [ ] **Step 3: Implement identity derivation**
+- [x] **Step 3: Implement identity derivation**
 
 Hash the UTF-8 SID with SHA-256, lowercase the first eight bytes as 16 hexadecimal characters, and build `AIUsageMonitor.Agent.v{major}.{hash}` plus `Local\AIUsageMonitor.Agent.v{major}.{hash}`. `WindowsCurrentUserIdentity` reads `WindowsIdentity.GetCurrent().User.Value` and throws `InvalidOperationException` if unavailable.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```powershell
 dotnet test tests/AIUsageMonitor.Ipc.Tests -c Release --no-restore
@@ -132,7 +135,7 @@ Expected: compilation fails for missing server/client.
 
 - [ ] **Step 3: Implement server and client**
 
-Use `NamedPipeServerStream` in byte mode, asynchronous mode, one server instance per accept loop, and `PipeOptions.CurrentUserOnly`. Bound concurrent handlers with `SemaphoreSlim(8, 8)`. Validate protocol and command before dispatch. A client connects with the provided timeout, writes one request, reads one response, and disposes its pipe.
+Use `NamedPipeServerStream` in byte mode, asynchronous mode, one server instance per accept loop, and `PipeOptions.CurrentUserOnly`. The client must also create `NamedPipeClientStream` with `PipeOptions.CurrentUserOnly`; this is required to prevent a different user from pre-creating the predictable pipe name and impersonating the Agent. Bound concurrent handlers with `SemaphoreSlim(8, 8)`. Validate protocol and command before dispatch. A client connects with the provided timeout, writes one request, reads one response, and disposes its pipe. Do not assert a stronger remote-rejection guarantee without a dedicated implementation and integration test.
 
 - [ ] **Step 4: Run GREEN and commit**
 
@@ -142,7 +145,60 @@ git add src/AIUsageMonitor.Ipc/Transport tests/AIUsageMonitor.Ipc.Tests/Transpor
 git commit -m "feat: exchange requests over named pipes"
 ```
 
-### Task 4: Background Agent host and lifecycle
+### Task 4: Concrete collection coordinator and watchers
+
+**Files:**
+- Create: `src/AIUsageMonitor.Infrastructure/Collection/CollectionCoordinator.cs`
+- Create: `src/AIUsageMonitor.Infrastructure/Collection/ProviderFileWatcher.cs`
+- Create: `src/AIUsageMonitor.Core/Collection/ICollectionControl.cs`
+- Test: `tests/AIUsageMonitor.Infrastructure.Tests/Collection/CollectionCoordinatorTests.cs`
+
+**Interfaces:**
+- Produces the concrete `ICollectionControl.RefreshAsync`, `PauseAsync`, `ResumeAsync`, and `DrainAsync` implementation required by the Agent.
+- Coordinates existing discovery, incremental readers, parsing, pricing, checkpoints, SQLite writes, bounded queue, provider watchers, and scheduled reconciliation without changing parser/store semantics.
+
+- [ ] **Step 1: Write failing coordinator tests**
+
+Cover initial reconciliation, watcher events entering the bounded queue, idempotent pause, resume ordering (reconcile before watchers start), provider failure isolation, queue drain, cancellation, and checkpoint-based duplicate prevention.
+
+- [ ] **Step 2: Run RED**
+
+Run the new collection tests and confirm compilation fails for the missing coordinator/control types.
+
+- [ ] **Step 3: Implement coordinator and watchers**
+
+Move no orchestration into the Agent host. The Infrastructure implementation owns watcher creation/disposal and queue processing; expose state/health through stable Core abstractions. Use injectable watcher/clock/filesystem seams in tests.
+
+- [ ] **Step 4: Run GREEN and commit**
+
+Run Infrastructure and existing parser/store tests, then commit `feat: coordinate background collection`.
+
+### Task 5: Query contracts and read APIs
+
+**Files:**
+- Create: `src/AIUsageMonitor.Ipc/Contracts/UsageQueryContracts.cs`
+- Create: `src/AIUsageMonitor.Core/Queries/IUsageQueryService.cs`
+- Create: `src/AIUsageMonitor.Infrastructure/Queries/SqliteUsageQueryService.cs`
+- Test: `tests/AIUsageMonitor.Infrastructure.Tests/Queries/SqliteUsageQueryServiceTests.cs`
+- Test: `tests/AIUsageMonitor.Ipc.Tests/Contracts/UsageQueryContractTests.cs`
+
+**Interfaces:**
+- Defines typed request/response payloads for `usage.summary.get`, `usage.projects.get`, `usage.models.get`, and `usage.sessions.get`, including profile, time range, paging, data timestamp, and validation errors.
+- Produces read-only query methods used identically by Agent handlers and CLI fallback; no arbitrary SQL or paths cross IPC.
+
+- [ ] **Step 1: Write failing contract and query tests**
+
+Cover JSON round trips, invalid ranges/page sizes, aggregate parity with existing data, paging stability, cancellation, and SQLite opened with `Mode=ReadOnly;Cache=Shared` for fallback.
+
+- [ ] **Step 2: Implement typed contracts and query service**
+
+Keep DTOs version-stable and localized-independent. Reuse existing aggregate logic where present and ensure results expose `databaseUpdatedAtUtc`.
+
+- [ ] **Step 3: Restore, run GREEN, and commit**
+
+Run `dotnet restore AIUsageMonitor.sln`, then query/contract and existing database tests. Commit `feat: define agent usage queries`.
+
+### Task 6: Background Agent host and lifecycle
 
 **Files:**
 - Create: `src/AIUsageMonitor.Agent/AIUsageMonitor.Agent.csproj`
@@ -150,7 +206,6 @@ git commit -m "feat: exchange requests over named pipes"
 - Create: `src/AIUsageMonitor.Agent/AgentRuntime.cs`
 - Create: `src/AIUsageMonitor.Agent/AgentRequestHandler.cs`
 - Create: `src/AIUsageMonitor.Agent/AgentState.cs`
-- Create: `src/AIUsageMonitor.Agent/ICollectionControl.cs`
 - Create: `src/AIUsageMonitor.Agent/SingleInstanceGuard.cs`
 - Create: `tests/AIUsageMonitor.Agent.Tests/AIUsageMonitor.Agent.Tests.csproj`
 - Create: `tests/AIUsageMonitor.Agent.Tests/AgentRequestHandlerTests.cs`
@@ -160,11 +215,11 @@ git commit -m "feat: exchange requests over named pipes"
 **Interfaces:**
 - Produces: health, pause, resume, refresh, and shutdown handlers.
 - Produces: state values `Starting`, `Running`, `Paused`, `Degraded`, `Stopping`.
-- Consumes: existing `IncrementalFileReader` and `SqliteUsageEventStore` through `ICollectionControl.RefreshAsync`, `PauseAsync`, `ResumeAsync`, and `DrainAsync`.
+- Consumes: the concrete collection coordinator from Task 4 through `ICollectionControl`.
 
 - [ ] **Step 1: Create Agent projects**
 
-Create a .NET 8 console Agent and xUnit test project, add them to the solution, and reference Core, Infrastructure, and IPC from Agent; reference Agent from tests.
+Create a .NET 8 console Agent and xUnit test project, add them to the solution, and reference Core, Infrastructure, and IPC from Agent; reference Agent from tests. Add explicit `Microsoft.Extensions.Hosting` package references at the repository's centrally managed version (or add/version them centrally if absent), then run `dotnet restore AIUsageMonitor.sln` before any `--no-restore` command.
 
 - [ ] **Step 2: Write failing lifecycle tests**
 
@@ -189,7 +244,21 @@ git add AIUsageMonitor.sln src/AIUsageMonitor.Agent tests/AIUsageMonitor.Agent.T
 git commit -m "feat: host collection in per-user agent"
 ```
 
-### Task 5: App and CLI connection policy
+### Task 7: Agent read-query handlers
+
+**Files:**
+- Modify: `src/AIUsageMonitor.Agent/AgentRequestHandler.cs`
+- Test: `tests/AIUsageMonitor.Agent.Tests/AgentQueryHandlerTests.cs`
+
+- [ ] **Step 1: Write failing handler tests**
+
+For all four usage query commands, assert typed request validation, correct `IUsageQueryService` dispatch, response/request correlation, timestamps/paging, cancellation, stable error codes, and rejection of arbitrary SQL/path fields.
+
+- [ ] **Step 2: Implement handlers and run GREEN**
+
+Map IPC DTOs to Task 5 APIs without duplicating SQL in Agent. Run Agent, IPC, and Infrastructure query tests and commit `feat: serve usage queries from agent`.
+
+### Task 8: App and CLI connection policy
 
 **Files:**
 - Create: `src/AIUsageMonitor.App/Services/AgentConnectionService.cs`
@@ -219,7 +288,7 @@ Run App and CLI test projects filtered to the new test classes. Expected: compil
 
 - [ ] **Step 4: Implement connection services**
 
-Inject clock, client factory, process launcher, and read-only query interface. Do not use `Task.Delay` directly in policy logic. Remove App's Infrastructure project reference after all App database calls route through Agent contracts; keep CLI's Infrastructure reference only for read-only fallback.
+Inject clock, client factory, process launcher, and the Task 5 read-only query interface. Do not use `Task.Delay` directly in policy logic. All processes remain non-elevated; access/elevation mismatch follows the same unavailable-Agent path and surfaces App offline/degraded state or CLI read-only fallback. Remove App's Infrastructure project reference after all App database calls route through Agent contracts; keep CLI's Infrastructure reference only for read-only fallback.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -230,28 +299,59 @@ git add src/AIUsageMonitor.App src/AIUsageMonitor.Cli tests/AIUsageMonitor.App.T
 git commit -m "feat: connect app and CLI to agent"
 ```
 
-### Task 6: StartupTask packaging and end-to-end verification
+### Task 9: Windows packaging project and opt-in StartupTask
 
 **Files:**
-- Create: `packaging/Package.appxmanifest`
-- Create: `tests/AIUsageMonitor.Agent.Tests/SingleInstanceIntegrationTests.cs`
-- Create: `tests/AIUsageMonitor.Agent.Tests/AgentRestartRecoveryTests.cs`
-- Create: `docs/qa/agent-architecture-checklist.md`
+- Create: `packaging/AIUsageMonitor.Package/AIUsageMonitor.Package.wapproj`
+- Create: `packaging/AIUsageMonitor.Package/Package.appxmanifest`
+- Create: `packaging/AIUsageMonitor.Package/Images/*`
+- Modify: `AIUsageMonitor.sln`
+- Create: `src/AIUsageMonitor.App/Services/StartupTaskService.cs`
+- Test: `tests/AIUsageMonitor.App.Tests/Services/StartupTaskServiceTests.cs`
+- Test: packaging manifest/project validation tests
 
 **Interfaces:**
-- Produces: MSIX `StartupTask` launching `AIUsageMonitor.Agent.exe` after logon.
+- Produces a real Windows Application Packaging Project/MSIX bundle containing App, Agent, and CLI, with an opt-in `StartupTask` for `AIUsageMonitor.Agent.exe`.
 
 - [ ] **Step 1: Add failing manifest validation test**
 
-Parse `Package.appxmanifest` and assert an enabled `desktop6:StartupTask` references `AIUsageMonitor.Agent.exe`, App remains the visible application, and minimum OS build is `22621`.
+Parse the packaging project and manifest. Assert App is the visible entry point, Agent is packaged, minimum OS build is `22621`, x64/ARM64 configurations exist, and `desktop6:StartupTask` references `AIUsageMonitor.Agent.exe` without being enabled by default.
 
 - [ ] **Step 2: Implement manifest and startup setting bridge**
 
-Add startup task ID `AIUsageMonitorAgentStartup`. App settings use `StartupTask.GetAsync`, `RequestEnableAsync`, and `Disable` and display the returned state without elevation.
+Add startup task ID `AIUsageMonitorAgentStartup`. App settings use `StartupTask.GetAsync`, call `RequestEnableAsync` only after explicit user opt-in, call `Disable` on opt-out, and display every returned state without elevation. Tests must prove first launch does not request enablement.
 
-- [ ] **Step 3: Add integration tests**
+- [ ] **Step 3: Restore and build package configurations**
 
-Run two Agent processes against a temporary profile and assert the second exits `10`. Kill the first after a committed checkpoint, append one event, restart, refresh, and assert exactly one new event and zero duplicates.
+Run `dotnet restore AIUsageMonitor.sln` after adding the packaging project and packages. Build/package explicit `win-x64` and `win-arm64` outputs and an MSIX bundle; do not rely on AnyCPU as architecture validation.
+
+- [ ] **Step 4: Verify clean-VM startup behavior**
+
+On clean Windows 11 23H2-or-later x64 and ARM64 VMs, install each bundle, prove StartupTask is initially disabled, opt in/out through App, log off/on, and verify the non-elevated Agent starts only when enabled.
+
+- [ ] **Step 5: Commit**
+
+Commit `chore: package opt-in per-user agent` after packaging and App tests pass.
+
+### Task 10: End-to-end recovery and architecture verification
+
+**Files:**
+- Create: `tests/AIUsageMonitor.Agent.Tests/SingleInstanceIntegrationTests.cs`
+- Create: `tests/AIUsageMonitor.Agent.Tests/AgentRestartRecoveryTests.cs`
+- Create: `tests/AIUsageMonitor.Ipc.Tests/Transport/CurrentUserOnlyIntegrationTests.cs`
+- Create: `docs/qa/agent-architecture-checklist.md`
+
+- [ ] **Step 1: Add process and recovery integration tests**
+
+Run two Agent processes against a temporary profile and assert the second exits `10`. Kill the first after a committed checkpoint, append one event, restart, refresh, and assert exactly one new event and zero duplicates. Verify App exit leaves collection active and planned shutdown drains/closes SQLite.
+
+- [ ] **Step 2: Add Windows IPC security integration tests**
+
+Verify same-user server/client success and different-user failure in a controlled Windows environment. Include a pipe-name-squatting case proving the client-side `PipeOptions.CurrentUserOnly` defense. Record only the guarantees actually demonstrated; do not add an untested categorical remote-rejection claim.
+
+- [ ] **Step 3: Validate native SQLite per architecture**
+
+Launch the installed `win-x64` and `win-arm64` packages on matching clean VMs, collect and query a fixture through Agent/App/CLI, and verify the native SQLite library loads, migrations run, writes succeed only in Agent, and CLI read-only fallback works.
 
 - [ ] **Step 4: Run complete verification**
 
@@ -267,6 +367,6 @@ Expected: build has zero warnings/errors, every discovered test passes, diff che
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add packaging docs/qa tests/AIUsageMonitor.Agent.Tests src/AIUsageMonitor.App
-git commit -m "chore: start per-user agent after logon"
+git add docs/qa tests/AIUsageMonitor.Agent.Tests tests/AIUsageMonitor.Ipc.Tests
+git commit -m "test: verify per-user agent architecture"
 ```
