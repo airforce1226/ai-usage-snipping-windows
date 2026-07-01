@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="AIUsageMonitor.App" />
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{4f476546-9378-4f26-9d3c-6f3efbbf1c7d}" />
+    </application>
+  </compatibility>
+</assembly>

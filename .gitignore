@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.dotnet-home/
+.appdata/
+.packages/
+TestResults/
+*.user
+*.suo
+*.pfx
+*.cer
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
