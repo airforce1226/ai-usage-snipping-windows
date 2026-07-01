@@ -44,4 +44,12 @@ public sealed class UserEndpointIdentityTests
         Assert.DoesNotContain(sid, identity.MutexName, StringComparison.Ordinal);
         Assert.Matches(@"^AIUsageMonitor\.Agent\.v1\.[0-9a-f]{16}$", identity.PipeName);
     }
+
+    [Fact]
+    public void Create_UsesSha256ForAnotherSid()
+    {
+        UserEndpointIdentity identity = UserEndpointIdentity.Create("S-1-5-18", 1);
+
+        Assert.Equal("AIUsageMonitor.Agent.v1.593347bdfcc9bfa7", identity.PipeName);
+    }
 }
