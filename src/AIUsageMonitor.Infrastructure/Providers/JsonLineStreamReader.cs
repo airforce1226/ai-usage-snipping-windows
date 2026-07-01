@@ -47,9 +47,13 @@ public sealed class JsonLineStreamReader
                             textLength--;
                         }
 
-                        lines.Add(new JsonLine(
-                            Encoding.UTF8.GetString(lineBytes, 0, textLength),
-                            currentLineOffset));
+                        var text = Encoding.UTF8.GetString(lineBytes, 0, textLength);
+                        if (currentLineOffset == 0 && text.Length > 0 && text[0] == '\uFEFF')
+                        {
+                            text = text[1..];
+                        }
+
+                        lines.Add(new JsonLine(text, currentLineOffset));
                         completeByteOffset += lineBuffer.WrittenCount + 1;
                         currentLineOffset = completeByteOffset;
                         lineBuffer.Clear();
