@@ -24,4 +24,11 @@
     <ProjectReference Include="..\..\src\AIUsageMonitor.Infrastructure\AIUsageMonitor.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\Fixtures\**\*">
+      <Link>Fixtures\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

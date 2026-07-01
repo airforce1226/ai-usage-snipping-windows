@@ -5,4 +5,5 @@ public sealed record SourceCheckpoint(
     long ByteOffset,
     long FileLength,
     DateTimeOffset LastWriteTimeUtc,
-    string ParserVersion);
+    string ParserVersion,
+    IReadOnlyDictionary<string, string>? ProviderState = null);

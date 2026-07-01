@@ -14,11 +14,13 @@ public sealed record ParseContext(
     string SourcePath,
     string ProjectId,
     long StartOffset,
-    string ParserVersion);
+    string ParserVersion,
+    IReadOnlyDictionary<string, string>? ProviderState = null);
 
 public sealed record ParseFailure(long ByteOffset, string Category);
 
 public sealed record ParseResult(
     IReadOnlyList<UsageEvent> Events,
     IReadOnlyList<ParseFailure> Failures,
-    long CompleteByteOffset);
+    long CompleteByteOffset,
+    IReadOnlyDictionary<string, string> NextProviderState);

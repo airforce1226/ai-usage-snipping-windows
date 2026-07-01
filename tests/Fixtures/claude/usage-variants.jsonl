@@ -1,0 +1,4 @@
+{"type":"assistant","uuid":"message-1","sessionId":"claude-session-1","cwd":"C:\\work\\alpha","timestamp":"2026-07-01T01:00:00.000Z","message":{"model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":10}}}
+{"type":"user","uuid":"message-2","sessionId":"claude-session-1","cwd":"C:\\work\\alpha","timestamp":"2026-07-01T01:01:00Z","message":{"model":"claude-sonnet-4-6"}}
+not-json
+{"type":"assistant","uuid":"message-3","sessionId":"claude-session-1","cwd":"C:\\work\\alpha","timestamp":"2026-07-01T01:02:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":7}}}
