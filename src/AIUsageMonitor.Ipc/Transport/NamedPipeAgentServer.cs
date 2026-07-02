@@ -15,15 +15,25 @@ public sealed class NamedPipeAgentServer
 
     private readonly string pipeName;
     private readonly IIpcRequestHandler requestHandler;
+    private readonly Action? acceptingConnection;
     private readonly SemaphoreSlim activeHandlers = new(8, 8);
     private readonly object handlersLock = new();
     private readonly HashSet<Task> activeConnectionTasks = [];
 
     public NamedPipeAgentServer(string pipeName, IIpcRequestHandler requestHandler)
+        : this(pipeName, requestHandler, null)
+    {
+    }
+
+    internal NamedPipeAgentServer(
+        string pipeName,
+        IIpcRequestHandler requestHandler,
+        Action? acceptingConnection)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         this.pipeName = pipeName;
         this.requestHandler = requestHandler ?? throw new ArgumentNullException(nameof(requestHandler));
+        this.acceptingConnection = acceptingConnection;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -32,6 +42,7 @@ public sealed class NamedPipeAgentServer
         {
             while (true)
             {
+                acceptingConnection?.Invoke();
                 await activeHandlers.WaitAsync(cancellationToken).ConfigureAwait(false);
                 NamedPipeServerStream pipe = CreatePipe();
                 try

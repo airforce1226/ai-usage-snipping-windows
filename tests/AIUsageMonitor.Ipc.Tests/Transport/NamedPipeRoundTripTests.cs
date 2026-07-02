@@ -111,15 +111,22 @@ public sealed class NamedPipeRoundTripTests
     {
         string pipeName = UniquePipeName();
         var handler = new GatedHandler();
-        var server = new NamedPipeAgentServer(pipeName, handler);
+        int acceptingCount = 0;
+        var ninthAcceptAttempt = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new NamedPipeAgentServer(pipeName, handler, () =>
+        {
+            if (Interlocked.Increment(ref acceptingCount) == 9)
+            {
+                ninthAcceptAttempt.TrySetResult();
+            }
+        });
         using var cancellation = new CancellationTokenSource();
         Task serverTask = server.RunAsync(cancellation.Token);
         var client = new NamedPipeAgentClient(pipeName);
         Task<IpcResponse>[] clients = Enumerable.Range(1, 9).Select(index => client.SendAsync(
             CreateRequest($"limit-{index}", "agent.health.get"), TimeSpan.FromSeconds(5), CancellationToken.None)).ToArray();
+        await ninthAcceptAttempt.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await handler.EightStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-
-        await Task.Delay(100);
         Assert.Equal(8, handler.StartedCount);
         handler.ReleaseOne();
         await handler.NinthStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
