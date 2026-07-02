@@ -27,6 +27,7 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
     private readonly Task worker;
     private TaskCompletionSource idle = CompletedSource();
     private int pending;
+    private int entrants;
     private bool resumed;
     private bool disposed;
 
@@ -63,6 +64,7 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
         await lifecycleGate.WaitAsync(cancellationToken);
         try
         {
+            if (disposed) return;
             if (!resumed) return;
             resumed = false;
             var current = watchers.ToArray();
@@ -79,6 +81,7 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
         var created = new List<IProviderFileWatcher>();
         try
         {
+            ThrowIfDisposed();
             if (resumed) return;
             foreach (var source in sources)
             {
@@ -105,22 +108,29 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
     public async ValueTask DrainAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
         Task wait;
-        lock (stateLock) wait = pending == 0 ? Task.CompletedTask : idle.Task;
+        lock (stateLock) wait = pending == 0 && entrants == 0 ? Task.CompletedTask : idle.Task;
         if (timeout == Timeout.InfiniteTimeSpan) await wait.WaitAsync(cancellationToken);
         else await wait.WaitAsync(timeout, cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (disposed) return;
-        await PauseAsync(CancellationToken.None);
-        disposed = true;
-        queue.Writer.TryComplete();
-        await worker;
-        lifetime.Cancel();
-        lifetime.Dispose();
-        lifecycleGate.Dispose();
-        ingressSlots.Dispose();
+        await lifecycleGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            if (disposed) return;
+            disposed = true;
+            resumed = false;
+            var current = watchers.ToArray();
+            watchers.Clear();
+            foreach (var watcher in current) await watcher.DisposeAsync();
+            queue.Writer.TryComplete();
+            await worker;
+            lifetime.Cancel();
+            lifetime.Dispose();
+            ingressSlots.Dispose();
+        }
+        finally { lifecycleGate.Release(); }
     }
 
     private async ValueTask ReconcileSafelyAsync(SourceRegistration source, CancellationToken token)
@@ -141,18 +151,32 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
         lock (stateLock)
         {
             if (work.TryGetValue(key, out var existing)) { existing.Dirty = true; return; }
+            if (pending == 0 && entrants == 0) idle = NewSource();
+            entrants++;
         }
-        await ingressSlots.WaitAsync(token);
+        try { await ingressSlots.WaitAsync(token); }
+        catch
+        {
+            lock (stateLock)
+            {
+                entrants--;
+                SignalIdleIfComplete();
+            }
+            throw;
+        }
         lock (stateLock)
         {
             if (work.TryGetValue(key, out var existing))
             {
                 existing.Dirty = true;
+                entrants--;
+                SignalIdleIfComplete();
                 ingressSlots.Release();
                 return;
             }
             work.Add(key, new WorkState(source));
-            if (pending++ == 0) idle = NewSource();
+            entrants--;
+            pending++;
         }
         try { await queue.Writer.WriteAsync(key, token); }
         catch { Finish(key); throw; }
@@ -183,7 +207,8 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
                 if (!rerun)
                 {
                     work.Remove(key);
-                    if (--pending == 0) idle.TrySetResult();
+                    pending--;
+                    SignalIdleIfComplete();
                 }
             }
             if (rerun) await queue.Writer.WriteAsync(key);
@@ -196,12 +221,17 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
         lock (stateLock)
         {
             work.Remove(key);
-            if (--pending == 0) idle.TrySetResult();
+            pending--;
+            SignalIdleIfComplete();
         }
         ingressSlots.Release();
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
+    private void SignalIdleIfComplete()
+    {
+        if (pending == 0 && entrants == 0) idle.TrySetResult();
+    }
     private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static TaskCompletionSource CompletedSource() { var result = NewSource(); result.SetResult(); return result; }
     private sealed record SourceRegistration(int Id, ProviderCollectionSource Source);

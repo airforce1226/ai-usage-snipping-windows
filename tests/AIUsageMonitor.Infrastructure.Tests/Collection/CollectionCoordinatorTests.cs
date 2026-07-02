@@ -266,6 +266,57 @@ public sealed class CollectionCoordinatorTests : IDisposable
         Assert.Equal(2, watchers.Created.Count);
     }
 
+    [Fact]
+    public async Task DrainAsync_WaitsForEnqueueAlreadyBlockedOnIngressCapacity()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(temporaryDirectory, "drain-reservation")).FullName;
+        var firstPath = Path.Combine(root, "first.jsonl");
+        var secondPath = Path.Combine(root, "second.jsonl");
+        await WriteClaudeAsync(firstPath, "first");
+        await WriteClaudeAsync(secondPath, "second");
+        var parser = new SequencedBlockingParser();
+        var watchers = new FakeWatcherFactory();
+        await using var coordinator = new CollectionCoordinator(
+            [new ProviderCollectionSource(ProviderKind.Claude, root, "project", "v1", parser)],
+            new IncrementalFileReader(new RecordingStore(), new RecordingStore()), watchers, boundedCapacity: 1);
+        await coordinator.ResumeAsync(CancellationToken.None);
+        var firstGate = parser.BlockNext();
+        var secondGate = parser.BlockNext();
+        var first = watchers.Created.Single().RaisePathAsync(firstPath).AsTask();
+        await firstGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = watchers.Created.Single().RaisePathAsync(secondPath).AsTask();
+        var drain = coordinator.DrainAsync(TimeSpan.FromSeconds(5), CancellationToken.None).AsTask();
+        firstGate.Release.TrySetResult();
+        await secondGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var completedBeforeWaitingEnqueueFinished = drain.IsCompleted;
+        secondGate.Release.TrySetResult();
+        await Task.WhenAll(first, second, drain).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(completedBeforeWaitingEnqueueFinished);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WinsAgainstConcurrentResumeAndLeavesNoWatchers()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(temporaryDirectory, "dispose-race")).FullName;
+        var disposeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDispose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var watchers = new FakeWatcherFactory(onDispose: async () =>
+        {
+            disposeEntered.TrySetResult();
+            await releaseDispose.Task;
+        });
+        var coordinator = CreateCoordinator(new RecordingStore(), watchers, Source(ProviderKind.Claude, root));
+        await coordinator.ResumeAsync(CancellationToken.None);
+        var disposal = coordinator.DisposeAsync().AsTask();
+        await disposeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var resume = coordinator.ResumeAsync(CancellationToken.None).AsTask();
+        releaseDispose.TrySetResult();
+        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => resume);
+        Assert.Single(watchers.Created);
+        Assert.True(watchers.Created.Single().IsDisposed);
+    }
+
     public void Dispose() => Directory.Delete(temporaryDirectory, recursive: true);
 
     private static ProviderCollectionSource Source(ProviderKind provider, string root) =>
@@ -378,5 +429,26 @@ public sealed class CollectionCoordinatorTests : IDisposable
     {
         public override IEnumerable<string> Discover(string root) =>
             root == badRoot ? throw new IOException("discovery failed") : base.Discover(root);
+    }
+
+    private sealed class SequencedBlockingParser : IUsageRecordParser
+    {
+        private readonly ConcurrentQueue<Gate> gates = new();
+        public Gate BlockNext() { var gate = new Gate(); gates.Enqueue(gate); return gate; }
+        public async ValueTask<ParseResult> ParseAsync(Stream stream, ParseContext context, CancellationToken token)
+        {
+            if (gates.TryDequeue(out var gate))
+            {
+                gate.Entered.TrySetResult();
+                await gate.Release.Task.WaitAsync(token);
+            }
+            return new ParseResult([], [], stream.Length, new Dictionary<string, string>());
+        }
+    }
+
+    private sealed class Gate
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

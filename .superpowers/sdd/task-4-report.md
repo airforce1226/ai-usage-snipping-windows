@@ -60,3 +60,16 @@ callback exceptions are observed. The previously mislabeled provider fixture was
 - Focused coordinator/watcher tests: 15 passed, 0 failed, 0 skipped.
 - Full Infrastructure tests: 23 passed, 0 failed, 0 skipped.
 - Review-fix commit: `fix: harden collection coordinator concurrency`.
+
+## Drain and disposal linearization follow-up
+
+Two deterministic regressions were added. Before the fix, drain completed while a second accepted
+enqueue was waiting for the bounded ingress slot, and a resume already waiting on the lifecycle gate
+succeeded after disposal. Ingress entrants now participate in the same idle completion state as queued
+and in-flight work. Disposal marks the coordinator disposed and tears down watchers and the worker
+while holding the lifecycle gate; resume rechecks disposal after acquiring that gate.
+
+- Targeted race tests: 2 passed, 0 failed, 0 skipped.
+- Focused coordinator/watcher tests: 17 passed, 0 failed, 0 skipped.
+- Full Infrastructure tests: 25 passed, 0 failed, 0 skipped.
+- Follow-up commit: `fix: linearize collection drain and disposal`.
