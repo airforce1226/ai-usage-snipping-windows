@@ -1,8 +1,8 @@
 namespace AIUsageMonitor.Infrastructure.Collection;
 
-public sealed class SourceDiscoveryService
+public class SourceDiscoveryService
 {
-    public IEnumerable<string> Discover(string root)
+    public virtual IEnumerable<string> Discover(string root)
     {
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
         {

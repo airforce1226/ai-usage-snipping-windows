@@ -44,3 +44,19 @@ failure before implementation.
   full provider reconciliation.
 - Provider health records the latest processing exception and last successful processing time; it
   intentionally does not persist health across process restarts.
+
+## Concurrency hardening review
+
+Review findings were reproduced with deterministic gates before correction. The coordinator now
+uses source-plus-canonical-path work keys, preserves a dirty rerun while work is in flight, bounds
+unique admitted work, and atomically transitions work to idle so `DrainAsync` cannot observe an
+intermediate completion. An async lifecycle gate serializes pause/resume and disposes partial watcher
+sets. Resume creates disabled watchers, reconciles, starts them, and performs a final reconciliation.
+
+Discovery failures are isolated into provider health. The concrete watcher uses a bounded event pump,
+signals reconciliation on overflow/error/callback failure, and awaits the pump during disposal so
+callback exceptions are observed. The previously mislabeled provider fixture was corrected.
+
+- Focused coordinator/watcher tests: 15 passed, 0 failed, 0 skipped.
+- Full Infrastructure tests: 23 passed, 0 failed, 0 skipped.
+- Review-fix commit: `fix: harden collection coordinator concurrency`.
