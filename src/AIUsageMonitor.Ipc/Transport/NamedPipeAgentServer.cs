@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO.Pipes;
 using AIUsageMonitor.Ipc.Contracts;
 
@@ -17,6 +16,8 @@ public sealed class NamedPipeAgentServer
     private readonly string pipeName;
     private readonly IIpcRequestHandler requestHandler;
     private readonly SemaphoreSlim activeHandlers = new(8, 8);
+    private readonly object handlersLock = new();
+    private readonly HashSet<Task> activeConnectionTasks = [];
 
     public NamedPipeAgentServer(string pipeName, IIpcRequestHandler requestHandler)
     {
@@ -27,7 +28,6 @@ public sealed class NamedPipeAgentServer
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        var handlers = new ConcurrentBag<Task>();
         try
         {
             while (true)
@@ -37,7 +37,7 @@ public sealed class NamedPipeAgentServer
                 try
                 {
                     await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    handlers.Add(HandleConnectionAsync(pipe, cancellationToken));
+                    TrackConnection(HandleConnectionAsync(pipe, cancellationToken));
                     pipe = null!;
                 }
                 finally
@@ -52,7 +52,13 @@ public sealed class NamedPipeAgentServer
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await Task.WhenAll(handlers).ConfigureAwait(false);
+            Task[] remainingConnections;
+            lock (handlersLock)
+            {
+                remainingConnections = [.. activeConnectionTasks];
+            }
+
+            await Task.WhenAll(remainingConnections).ConfigureAwait(false);
         }
     }
 
@@ -73,11 +79,35 @@ public sealed class NamedPipeAgentServer
                 IpcResponse response = await CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);
                 await IpcFrameCodec.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
             }
+            catch (Exception)
+            {
+                // A malformed, disconnected, cancelled, or failed request is isolated to this connection.
+            }
             finally
             {
                 activeHandlers.Release();
             }
         }
+    }
+
+    private void TrackConnection(Task connectionTask)
+    {
+        lock (handlersLock)
+        {
+            activeConnectionTasks.Add(connectionTask);
+        }
+
+        _ = connectionTask.ContinueWith(
+            completedTask =>
+            {
+                lock (handlersLock)
+                {
+                    activeConnectionTasks.Remove(completedTask);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private Task<IpcResponse> CreateResponseAsync(IpcRequest request, CancellationToken cancellationToken)

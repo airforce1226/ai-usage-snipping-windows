@@ -66,6 +66,70 @@ public sealed class NamedPipeRoundTripTests
         Assert.Equal(requestIds.Order(), responses.Select(response => response.RequestId).Order());
     }
 
+    [Fact]
+    public async Task CancellationStopsBlockedHandlerAndClientWithoutHanging()
+    {
+        string pipeName = UniquePipeName();
+        var handler = new BlockingHandler();
+        var server = new NamedPipeAgentServer(pipeName, handler);
+        using var serverCancellation = new CancellationTokenSource();
+        Task serverTask = server.RunAsync(serverCancellation.Token);
+        var client = new NamedPipeAgentClient(pipeName);
+        Task<IpcResponse> clientTask = client.SendAsync(
+            CreateRequest("blocked-1", "agent.health.get"), TimeSpan.FromSeconds(5), CancellationToken.None);
+        await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        serverCancellation.Cancel();
+
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAnyAsync<Exception>(() => clientTask.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.True(handler.CancellationObserved);
+    }
+
+    [Fact]
+    public async Task HandlerFailureIsIsolatedAndServerServesNextClient()
+    {
+        string pipeName = UniquePipeName();
+        var handler = new FailOnceHandler();
+        var server = new NamedPipeAgentServer(pipeName, handler);
+        using var cancellation = new CancellationTokenSource();
+        Task serverTask = server.RunAsync(cancellation.Token);
+        var client = new NamedPipeAgentClient(pipeName);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => client.SendAsync(
+            CreateRequest("failure-1", "agent.health.get"), TimeSpan.FromSeconds(2), CancellationToken.None));
+        IpcResponse response = await client.SendAsync(
+            CreateRequest("success-1", "agent.health.get"), TimeSpan.FromSeconds(2), CancellationToken.None);
+
+        Assert.Equal("success-1", response.RequestId);
+        cancellation.Cancel();
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task AllowsEightHandlersAndWaitsToStartNinthUntilOneCompletes()
+    {
+        string pipeName = UniquePipeName();
+        var handler = new GatedHandler();
+        var server = new NamedPipeAgentServer(pipeName, handler);
+        using var cancellation = new CancellationTokenSource();
+        Task serverTask = server.RunAsync(cancellation.Token);
+        var client = new NamedPipeAgentClient(pipeName);
+        Task<IpcResponse>[] clients = Enumerable.Range(1, 9).Select(index => client.SendAsync(
+            CreateRequest($"limit-{index}", "agent.health.get"), TimeSpan.FromSeconds(5), CancellationToken.None)).ToArray();
+        await handler.EightStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await Task.Delay(100);
+        Assert.Equal(8, handler.StartedCount);
+        handler.ReleaseOne();
+        await handler.NinthStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        handler.ReleaseAll();
+        await Task.WhenAll(clients).WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
     private static IpcRequest CreateRequest(string requestId, string type, int protocolVersion = 1)
     {
         using JsonDocument document = JsonDocument.Parse("{}");
@@ -101,5 +165,64 @@ public sealed class NamedPipeRoundTripTests
     {
         public Task<IpcResponse> HandleAsync(IpcRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new IpcResponse(1, request.RequestId, request.Type, request.Payload, null));
+    }
+
+    private sealed class BlockingHandler : IIpcRequestHandler
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool CancellationObserved { get; private set; }
+
+        public async Task<IpcResponse> HandleAsync(IpcRequest request, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+
+            throw new InvalidOperationException();
+        }
+    }
+
+    private sealed class FailOnceHandler : IIpcRequestHandler
+    {
+        private int invocationCount;
+
+        public Task<IpcResponse> HandleAsync(IpcRequest request, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref invocationCount) == 1)
+            {
+                throw new InvalidOperationException("Expected test failure.");
+            }
+
+            return Task.FromResult(new IpcResponse(1, request.RequestId, request.Type, request.Payload, null));
+        }
+    }
+
+    private sealed class GatedHandler : IIpcRequestHandler
+    {
+        private readonly SemaphoreSlim releases = new(0, 9);
+        private int startedCount;
+
+        public TaskCompletionSource EightStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource NinthStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int StartedCount => Volatile.Read(ref startedCount);
+
+        public async Task<IpcResponse> HandleAsync(IpcRequest request, CancellationToken cancellationToken)
+        {
+            int count = Interlocked.Increment(ref startedCount);
+            if (count == 8) EightStarted.TrySetResult();
+            if (count == 9) NinthStarted.TrySetResult();
+            await releases.WaitAsync(cancellationToken);
+            return new IpcResponse(1, request.RequestId, request.Type, request.Payload, null);
+        }
+
+        public void ReleaseOne() => releases.Release();
+        public void ReleaseAll() => releases.Release(8);
     }
 }
