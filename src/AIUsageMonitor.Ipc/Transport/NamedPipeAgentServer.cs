@@ -88,10 +88,16 @@ public sealed class NamedPipeAgentServer
             {
                 IpcRequest request = await IpcFrameCodec.ReadAsync<IpcRequest>(pipe, cancellationToken).ConfigureAwait(false);
                 IpcResponse response = await CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);
-                await IpcFrameCodec.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
-                if (requestHandler is IIpcResponseCompletionHandler completionHandler)
+                try
                 {
-                    await completionHandler.ResponseCompletedAsync(request, response, CancellationToken.None).ConfigureAwait(false);
+                    await IpcFrameCodec.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (requestHandler is IIpcResponseCompletionHandler completionHandler)
+                    {
+                        await completionHandler.ResponseCompletedAsync(request, response, CancellationToken.None).ConfigureAwait(false);
+                    }
                 }
             }
             catch (Exception)

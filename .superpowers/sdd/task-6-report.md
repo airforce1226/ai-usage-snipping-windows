@@ -31,11 +31,13 @@
 
 ## Review verification
 
-- Agent: 12 passed before the final mutation-theory expansion; final suite rerun recorded in commit handoff.
-- IPC: 34 passed.
+- Agent: 14 passed, 0 failed (104 ms).
+- IPC: 36 passed, 0 failed (244 ms).
 - Infrastructure: 31 passed.
+- Disconnected-client RED timed out waiting for response completion; GREEN invokes completion exactly once after the write attempt, including failed writes, while preserving the successful response path.
 
 ## Commit
 
 - `feat: host collection in per-user agent`
 - `fix: harden agent lifecycle and composition`
+- `fix: complete shutdown after client disconnect`

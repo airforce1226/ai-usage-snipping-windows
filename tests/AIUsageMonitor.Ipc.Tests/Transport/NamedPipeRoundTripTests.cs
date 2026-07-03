@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Text.Json;
 using AIUsageMonitor.Ipc.Contracts;
 using AIUsageMonitor.Ipc.Transport;
@@ -104,6 +105,23 @@ public sealed class NamedPipeRoundTripTests
         Assert.Equal("success-1", response.RequestId);
         cancellation.Cancel();
         await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task CompletesShutdownResponseOnceWhenClientDisconnectsDuringWrite()
+    {
+        string pipeName=UniquePipeName();var handler=new CompletionHandler(largeResponse:true);var server=new NamedPipeAgentServer(pipeName,handler);using var cancellation=new CancellationTokenSource();var serverTask=server.RunAsync(cancellation.Token);
+        await using(var pipe=new NamedPipeClientStream(".",pipeName,PipeDirection.InOut,PipeOptions.Asynchronous)){await pipe.ConnectAsync(2000);await IpcFrameCodec.WriteAsync(pipe,CreateRequest("shutdown-disconnect","agent.shutdown"),default);await handler.Produced.Task.WaitAsync(TimeSpan.FromSeconds(2));}
+        await handler.Completed.Task.WaitAsync(TimeSpan.FromSeconds(2));Assert.Equal(1,handler.CompletionCount);
+        cancellation.Cancel();await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task CompletesSuccessfulShutdownResponseOnceAfterWrite()
+    {
+        string pipeName=UniquePipeName();var handler=new CompletionHandler(false);var server=new NamedPipeAgentServer(pipeName,handler);using var cancellation=new CancellationTokenSource();var serverTask=server.RunAsync(cancellation.Token);
+        var response=await new NamedPipeAgentClient(pipeName).SendAsync(CreateRequest("shutdown-success","agent.shutdown"),TimeSpan.FromSeconds(2),default);await handler.Completed.Task.WaitAsync(TimeSpan.FromSeconds(2));Assert.Equal("shutdown-success",response.RequestId);Assert.Equal(1,handler.CompletionCount);
+        cancellation.Cancel();await serverTask.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -231,5 +249,15 @@ public sealed class NamedPipeRoundTripTests
 
         public void ReleaseOne() => releases.Release();
         public void ReleaseAll() => releases.Release(8);
+    }
+
+    private sealed class CompletionHandler(bool largeResponse):IIpcRequestHandler,IIpcResponseCompletionHandler
+    {
+        private int completionCount;
+        public TaskCompletionSource Produced { get; }=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Completed { get; }=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CompletionCount=>Volatile.Read(ref completionCount);
+        public Task<IpcResponse> HandleAsync(IpcRequest request,CancellationToken token){var payload=JsonSerializer.SerializeToElement(new { value=largeResponse?new string('x',900_000):"ok" });Produced.TrySetResult();return Task.FromResult(new IpcResponse(1,request.RequestId,request.Type,payload,null));}
+        public ValueTask ResponseCompletedAsync(IpcRequest request,IpcResponse response,CancellationToken token){Interlocked.Increment(ref completionCount);Completed.TrySetResult();return ValueTask.CompletedTask;}
     }
 }
