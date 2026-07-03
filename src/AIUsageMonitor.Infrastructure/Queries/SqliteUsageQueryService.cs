@@ -47,13 +47,32 @@ public sealed class SqliteUsageQueryService : IUsageQueryService
     {
         EnsureValid(query);
         await using var connection = await OpenAsync(cancellationToken);
-        var totalCount = await CountGroupsAsync(connection, "session_id, project_id", query.Range, cancellationToken);
+        var totalCount = await CountGroupsAsync(connection, "session_id", query.Range, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT session_id, project_id, SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens),
-                   SUM(cache_write_tokens), COUNT(*), MAX(occurred_at_utc_ms) AS last_event
-            FROM usage_events WHERE occurred_at_utc_ms >= $fromUtc AND occurred_at_utc_ms < $toUtc
-            GROUP BY session_id, project_id ORDER BY last_event DESC, session_id ASC LIMIT $limit OFFSET $offset;
+            WITH filtered AS (
+                SELECT * FROM usage_events
+                WHERE occurred_at_utc_ms >= $fromUtc AND occurred_at_utc_ms < $toUtc
+            ), aggregated AS (
+                SELECT session_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+                       SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_write_tokens) AS cache_write_tokens,
+                       COUNT(*) AS event_count, MAX(occurred_at_utc_ms) AS last_event
+                FROM filtered GROUP BY session_id
+            ), latest_project AS (
+                SELECT session_id, project_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY session_id
+                           ORDER BY occurred_at_utc_ms DESC, stable_key DESC) AS row_number
+                FROM filtered
+            )
+            SELECT aggregated.session_id, latest_project.project_id, aggregated.input_tokens,
+                   aggregated.output_tokens, aggregated.cache_read_tokens, aggregated.cache_write_tokens,
+                   aggregated.event_count, aggregated.last_event
+            FROM aggregated
+            JOIN latest_project ON latest_project.session_id = aggregated.session_id
+                               AND latest_project.row_number = 1
+            ORDER BY aggregated.last_event DESC, aggregated.session_id ASC
+            LIMIT $limit OFFSET $offset;
             """;
         AddQuery(command, query);
         var items = new List<SessionUsage>();

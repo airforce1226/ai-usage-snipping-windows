@@ -43,3 +43,12 @@ Implemented protocol-stable usage query contracts and a shared SQLite read-only 
 ## Concerns
 
 - `DatabaseUpdatedAtUtc` is derived from the latest stored event occurrence or checkpoint last-write timestamp because the existing schema has no separate database mutation timestamp.
+
+## Review fix — 2026-07-03
+
+- RED: Core and IPC tests failed because `non_utc_timestamp` did not exist; session tests returned three rows for one session and counted six project/session groups instead of four unique sessions.
+- GREEN: session aggregation now groups only by session ID, selects the project from the latest event with descending stable-key tie-break, and retains deterministic session ordering and paging metadata.
+- UTC validation rejects non-zero offsets in both Core and IPC with `non_utc_timestamp`; JSON round-trip tests execute under `ar-SA` current and UI cultures.
+- Focused: Core query 2/2, IPC contract 14/14, Infrastructure query 6/6 passed.
+- Full: Core 6/6, IPC 34/34, Infrastructure 31/31 passed.
+- Fix commit: `fix: stabilize usage query contracts`.

@@ -50,6 +50,35 @@ public sealed class SqliteUsageQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Sessions_GroupAcrossProjectsAndSelectLatestProjectDeterministically()
+    {
+        var service = await SeedAsync(includeSharedSession: true);
+        var result = await service.GetSessionsAsync(
+            new PagedUsageQuery(new UsageQueryRange(from, to), new UsagePage(0, 10)),
+            CancellationToken.None);
+
+        var shared = Assert.Single(result.Items, item => item.SessionId == "session-shared");
+        Assert.Equal(3, shared.EventCount);
+        Assert.Equal(6, shared.InputTokens);
+        Assert.Equal(ExpectedTieProject(), shared.ProjectId);
+        Assert.Equal(4, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task Sessions_SecondPagePreservesStableOrderAndMetadata()
+    {
+        var service = await SeedAsync(includeSharedSession: true);
+        var result = await service.GetSessionsAsync(
+            new PagedUsageQuery(new UsageQueryRange(from, to), new UsagePage(2, 2)),
+            CancellationToken.None);
+
+        Assert.Equal(["session-b", "session-a"], result.Items.Select(item => item.SessionId));
+        Assert.Equal(2, result.Offset);
+        Assert.Equal(2, result.Limit);
+        Assert.Equal(4, result.TotalCount);
+    }
+
+    [Fact]
     public void ConnectionOptions_AreReadOnlyAndShared()
     {
         var service = new SqliteUsageQueryService(databasePath);
@@ -70,7 +99,7 @@ public sealed class SqliteUsageQueryServiceTests : IDisposable
             await service.GetSummaryAsync(new UsageQueryRange(from, to), cancellation.Token));
     }
 
-    private async Task<SqliteUsageQueryService> SeedAsync()
+    private async Task<SqliteUsageQueryService> SeedAsync(bool includeSharedSession = false)
     {
         var factory = new DatabaseConnectionFactory(databasePath);
         await new DatabaseMigrator(factory).InitializeAsync(CancellationToken.None);
@@ -83,7 +112,27 @@ public sealed class SqliteUsageQueryServiceTests : IDisposable
             Event("session-out", "project-a", "model-a", to, 100, 100, 100, 100, 30),
         };
         await store.UpsertBatchAsync(events, new SourceCheckpoint("C:/logs/a.jsonl", 50, 50, updated, "v1"), CancellationToken.None);
+        if (includeSharedSession)
+        {
+            var tieTimestamp = from.AddHours(4);
+            await store.UpsertBatchAsync(
+                [
+                    Event("session-shared", "project-old", "model-a", from.AddMinutes(30), 1, 0, 0, 0, 100),
+                    Event("session-shared", "project-tie-a", "model-a", tieTimestamp, 2, 0, 0, 0, 110),
+                    Event("session-shared", "project-tie-b", "model-a", tieTimestamp, 3, 0, 0, 0, 120),
+                ],
+                new SourceCheckpoint("C:/logs/a.jsonl", 150, 150, updated, "v1"),
+                CancellationToken.None);
+        }
         return new SqliteUsageQueryService(databasePath);
+    }
+
+    private string ExpectedTieProject()
+    {
+        var timestamp = from.AddHours(4);
+        var first = Event("session-shared", "project-tie-a", "model-a", timestamp, 2, 0, 0, 0, 110);
+        var second = Event("session-shared", "project-tie-b", "model-a", timestamp, 3, 0, 0, 0, 120);
+        return string.CompareOrdinal(first.StableKey, second.StableKey) > 0 ? first.ProjectId : second.ProjectId;
     }
 
     private static UsageEvent Event(string session, string project, string model, DateTimeOffset timestamp, long input, long output, long read, long write, long offset) =>

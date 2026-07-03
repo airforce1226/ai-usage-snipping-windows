@@ -5,6 +5,7 @@ public static class UsageQueryValidationErrorCodes
     public const string InvalidRange = "usage.invalid_range";
     public const string InvalidPageSize = "usage.invalid_page_size";
     public const string InvalidOffset = "usage.invalid_offset";
+    public const string NonUtcTimestamp = "non_utc_timestamp";
 }
 
 public sealed record QueryValidationResult(bool IsValid, string? ErrorCode)
@@ -15,9 +16,17 @@ public sealed record QueryValidationResult(bool IsValid, string? ErrorCode)
 
 public sealed record UsageQueryRange(DateTimeOffset FromUtc, DateTimeOffset ToUtc)
 {
-    public QueryValidationResult Validate() => FromUtc >= ToUtc
-        ? QueryValidationResult.Invalid(UsageQueryValidationErrorCodes.InvalidRange)
-        : QueryValidationResult.Valid;
+    public QueryValidationResult Validate()
+    {
+        if (FromUtc.Offset != TimeSpan.Zero || ToUtc.Offset != TimeSpan.Zero)
+        {
+            return QueryValidationResult.Invalid(UsageQueryValidationErrorCodes.NonUtcTimestamp);
+        }
+
+        return FromUtc >= ToUtc
+            ? QueryValidationResult.Invalid(UsageQueryValidationErrorCodes.InvalidRange)
+            : QueryValidationResult.Valid;
+    }
 }
 
 public sealed record UsagePage(int Offset, int Limit)

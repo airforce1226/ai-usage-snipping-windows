@@ -16,6 +16,7 @@ public static class UsageQueryValidationErrorCodes
     public const string InvalidPageSize = "usage.invalid_page_size";
     public const string InvalidOffset = "usage.invalid_offset";
     public const string InvalidProfileId = "usage.invalid_profile_id";
+    public const string NonUtcTimestamp = "non_utc_timestamp";
 }
 
 public sealed record UsageQueryValidationResult(bool IsValid, string? ErrorCode)
@@ -23,6 +24,7 @@ public sealed record UsageQueryValidationResult(bool IsValid, string? ErrorCode)
     internal static UsageQueryValidationResult Validate(string profileId, DateTimeOffset fromUtc, DateTimeOffset toUtc, int? offset = null, int? limit = null)
     {
         if (string.IsNullOrWhiteSpace(profileId)) return new(false, UsageQueryValidationErrorCodes.InvalidProfileId);
+        if (fromUtc.Offset != TimeSpan.Zero || toUtc.Offset != TimeSpan.Zero) return new(false, UsageQueryValidationErrorCodes.NonUtcTimestamp);
         if (fromUtc >= toUtc) return new(false, UsageQueryValidationErrorCodes.InvalidRange);
         if (limit is < 1 or > 200) return new(false, UsageQueryValidationErrorCodes.InvalidPageSize);
         if (offset < 0) return new(false, UsageQueryValidationErrorCodes.InvalidOffset);

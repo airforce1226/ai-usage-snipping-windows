@@ -25,14 +25,25 @@ public sealed class UsageQueryContractTests
     [MemberData(nameof(Payloads))]
     public void Payload_RoundTripsWithCamelCaseAndInvariantUtc(object payload, Type payloadType)
     {
-        var json = JsonSerializer.Serialize(payload, payloadType, UsageQueryJson.Options);
-        var roundTrip = JsonSerializer.Deserialize(json, payloadType, UsageQueryJson.Options);
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ar-SA");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ar-SA");
+            var json = JsonSerializer.Serialize(payload, payloadType, UsageQueryJson.Options);
+            var roundTrip = JsonSerializer.Deserialize(json, payloadType, UsageQueryJson.Options);
 
-        Assert.NotNull(roundTrip);
-        Assert.Equal(json, JsonSerializer.Serialize(roundTrip, payloadType, UsageQueryJson.Options));
-        Assert.DoesNotContain("\"ProfileId\"", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("ProfileId", json, StringComparison.Ordinal);
-        Assert.DoesNotContain(DateTimeFormatInfo.CurrentInfo.ShortDatePattern, json, StringComparison.Ordinal);
+            Assert.NotNull(roundTrip);
+            Assert.Equal(json, JsonSerializer.Serialize(roundTrip, payloadType, UsageQueryJson.Options));
+            Assert.DoesNotContain("ProfileId", json, StringComparison.Ordinal);
+            Assert.Contains("2026-07-", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]
@@ -62,5 +73,16 @@ public sealed class UsageQueryContractTests
         var request = new UsageProjectsRequest("profile", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1), 0, limit);
 
         Assert.Equal(UsageQueryValidationErrorCodes.InvalidPageSize, request.Validate().ErrorCode);
+    }
+
+    [Fact]
+    public void Request_RejectsNonUtcTimestamp()
+    {
+        var request = new UsageSummaryRequest(
+            "profile",
+            new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.FromHours(9)),
+            new DateTimeOffset(2026, 7, 2, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(UsageQueryValidationErrorCodes.NonUtcTimestamp, request.Validate().ErrorCode);
     }
 }
