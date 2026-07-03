@@ -51,7 +51,9 @@ public sealed class AgentRuntimeTests
         collection.OnDrain = () => Assert.Equal(AgentState.Stopping, runtime.Health.State);
         Assert.Equal(0, await runtime.ShutdownAsync(default));
         Assert.Equal(TimeSpan.FromSeconds(10), collection.DrainTimeout);
-        Assert.Equal(["resume", "drain", "signal"], collection.Calls.Concat(shutdown.Calls));
+        Assert.Empty(shutdown.Calls);
+        runtime.CompleteShutdownResponse();
+        Assert.Equal(["signal"], shutdown.Calls);
     }
 
     [Fact]
@@ -61,7 +63,16 @@ public sealed class AgentRuntimeTests
         var runtime = new AgentRuntime(collection, () => DateTimeOffset.UtcNow, shutdown);
         await runtime.StartAsync(default);
         Assert.Equal(12, await runtime.ShutdownAsync(default));
+        runtime.CompleteShutdownResponse();
         Assert.Equal(["signal"], shutdown.Calls);
+    }
+
+    [Fact]
+    public async Task ConcurrentShutdownCallsShareOneTaskAndOneDrain()
+    {
+        var collection=new RecordingCollection();var runtime=Create(collection);await runtime.StartAsync(default);
+        var first=runtime.ShutdownAsync(default);var second=runtime.ShutdownAsync(default);
+        Assert.Same(first,second);Assert.Equal(0,await first);Assert.Equal(1,collection.Calls.Count(x=>x=="drain"));
     }
 
     private static AgentRuntime Create(RecordingCollection c) => new(c, () => DateTimeOffset.UtcNow, new RecordingShutdown());

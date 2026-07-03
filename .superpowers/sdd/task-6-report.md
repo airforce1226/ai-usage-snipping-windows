@@ -24,8 +24,18 @@
 
 ## Concerns
 
-- Health collection/database success timestamps remain nullable because `ICollectionControl` does not currently expose those timestamps. Initial health reports them as unavailable, as permitted by the brief.
+- Review hardening added a dedicated mutex owner thread, so acquisition and release always occur on the same thread while callers may dispose safely from any thread.
+- Shutdown calls now share one result task. Host shutdown is signaled through the IPC response-completion hook only after the response frame has been written.
+- Collection health is exposed through a minimal `ICollectionHealth` interface and populated from coordinator provider success state.
+- Composition resolution tests cover per-user roots/database path and all host-owned Agent services.
+
+## Review verification
+
+- Agent: 12 passed before the final mutation-theory expansion; final suite rerun recorded in commit handoff.
+- IPC: 34 passed.
+- Infrastructure: 31 passed.
 
 ## Commit
 
 - `feat: host collection in per-user agent`
+- `fix: harden agent lifecycle and composition`

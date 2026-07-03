@@ -5,7 +5,12 @@ using AIUsageMonitor.Ipc.Contracts;
 namespace AIUsageMonitor.Agent.Tests;
 public sealed class AgentRequestHandlerTests
 {
- [Fact] public async Task MutationDuringStoppingReturnsStableErrorWithoutCollectionCall(){var c=new GateCollection();var r=new AgentRuntime(c,()=>DateTimeOffset.UtcNow,new ShutdownSignal());await r.StartAsync(default);var stop=r.ShutdownAsync(default);await c.Entered.Task;var h=new AgentRequestHandler(r);var response=await h.HandleAsync(new(1,"r","collection.pause",JsonDocument.Parse("{}").RootElement),default);Assert.Equal("agent_stopping",response.Error?.Code);Assert.Equal(1,c.CallCount);c.Release.SetResult();await stop;}
+ [Theory]
+ [InlineData("collection.pause")]
+ [InlineData("collection.resume")]
+ [InlineData("collection.refresh")]
+ public async Task MutationDuringStoppingReturnsStableErrorWithoutCollectionCall(string type){var c=new GateCollection();var r=new AgentRuntime(c,()=>DateTimeOffset.UtcNow,new ShutdownSignal());await r.StartAsync(default);var stop=r.ShutdownAsync(default);await c.Entered.Task;var h=new AgentRequestHandler(r);var response=await h.HandleAsync(new(1,"r",type,JsonDocument.Parse("{}").RootElement),default);Assert.Equal("agent_stopping",response.Error?.Code);Assert.Equal(1,c.CallCount);c.Release.SetResult();await stop;}
+ [Fact] public async Task ShutdownSignalsOnlyAfterResponseCompletion(){var c=new GateCollection();var signal=new ShutdownSignal();var r=new AgentRuntime(c,()=>DateTimeOffset.UtcNow,signal);await r.StartAsync(default);c.Release.SetResult();var h=new AgentRequestHandler(r);var request=new IpcRequest(1,"r","agent.shutdown",JsonDocument.Parse("{}").RootElement);var response=await h.HandleAsync(request,default);Assert.Equal(0,signal.Count);await h.ResponseCompletedAsync(request,response,default);Assert.Equal(1,signal.Count);}
  private sealed class GateCollection:ICollectionControl { public int CallCount;public TaskCompletionSource Entered{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);public TaskCompletionSource Release{get;}=new(TaskCreationOptions.RunContinuationsAsynchronously);public ValueTask ResumeAsync(CancellationToken t){CallCount++;return ValueTask.CompletedTask;}public ValueTask PauseAsync(CancellationToken t){CallCount++;return ValueTask.CompletedTask;}public ValueTask RefreshAsync(CancellationToken t){CallCount++;return ValueTask.CompletedTask;}public async ValueTask DrainAsync(TimeSpan x,CancellationToken t){Entered.SetResult();await Release.Task;} }
- private sealed class ShutdownSignal:IHostShutdownSignal{public void Signal(){}}
+ private sealed class ShutdownSignal:IHostShutdownSignal{public int Count;public void Signal()=>Count++;}
 }

@@ -7,3 +7,9 @@ public interface ICollectionControl
     ValueTask ResumeAsync(CancellationToken cancellationToken);
     ValueTask DrainAsync(TimeSpan timeout, CancellationToken cancellationToken);
 }
+
+public interface ICollectionHealth
+{
+    DateTimeOffset? LastSuccessfulCollectionUtc { get; }
+    DateTimeOffset? LastSuccessfulDatabaseUtc { get; }
+}

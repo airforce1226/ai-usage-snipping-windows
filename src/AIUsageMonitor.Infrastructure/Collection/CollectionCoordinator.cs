@@ -10,7 +10,7 @@ namespace AIUsageMonitor.Infrastructure.Collection;
 public sealed record ProviderCollectionSource(ProviderKind Provider, string Root, string ProjectId, string ParserVersion, IUsageRecordParser Parser);
 public sealed record ProviderCollectionHealth(Exception? LastError, DateTimeOffset? LastSuccessUtc);
 
-public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
+public sealed class CollectionCoordinator : ICollectionControl, ICollectionHealth, IAsyncDisposable
 {
     private readonly IReadOnlyList<SourceRegistration> sources;
     private readonly IncrementalFileReader reader;
@@ -51,6 +51,8 @@ public sealed class CollectionCoordinator : ICollectionControl, IAsyncDisposable
     }
 
     public IReadOnlyDictionary<ProviderKind, ProviderCollectionHealth> ProviderHealth { get; }
+    public DateTimeOffset? LastSuccessfulCollectionUtc => health.Values.Max(value => value.LastSuccessUtc);
+    public DateTimeOffset? LastSuccessfulDatabaseUtc => LastSuccessfulCollectionUtc;
 
     public async ValueTask RefreshAsync(CancellationToken cancellationToken)
     {
