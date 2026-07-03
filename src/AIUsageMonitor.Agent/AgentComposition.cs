@@ -1,8 +1,10 @@
 using AIUsageMonitor.Core.Abstractions;
 using AIUsageMonitor.Core.Collection;
 using AIUsageMonitor.Core.Domain;
+using AIUsageMonitor.Core.Queries;
 using AIUsageMonitor.Infrastructure.Collection;
 using AIUsageMonitor.Infrastructure.Persistence;
+using AIUsageMonitor.Infrastructure.Queries;
 using AIUsageMonitor.Infrastructure.Providers.Claude;
 using AIUsageMonitor.Infrastructure.Providers.Codex;
 using AIUsageMonitor.Ipc.Security;
@@ -21,6 +23,7 @@ public static class AgentComposition
   services.AddSingleton<ICurrentUserIdentity,WindowsCurrentUserIdentity>();
   services.AddSingleton(sp=>UserEndpointIdentity.Create(sp.GetRequiredService<ICurrentUserIdentity>().GetSid(),1));
   services.AddSingleton(new DatabaseConnectionFactory(paths.DatabasePath));services.AddSingleton<DatabaseMigrator>();services.AddSingleton<SqliteUsageEventStore>();
+  services.AddSingleton(sp=>new SqliteUsageQueryService(paths.DatabasePath));services.AddSingleton<IUsageQueryService>(sp=>sp.GetRequiredService<SqliteUsageQueryService>());
   services.AddSingleton<IUsageEventStore>(sp=>sp.GetRequiredService<SqliteUsageEventStore>());services.AddSingleton<ISourceCheckpointStore>(sp=>sp.GetRequiredService<SqliteUsageEventStore>());
   services.AddSingleton<IncrementalFileReader>();services.AddSingleton<IProviderFileWatcherFactory,ProviderFileWatcherFactory>();
   services.AddSingleton(sp=>new CollectionCoordinator([new(ProviderKind.Claude,paths.ClaudeRoot,"default","1",new ClaudeUsageRecordParser()),new(ProviderKind.Codex,paths.CodexRoot,"default","1",new CodexUsageRecordParser())],sp.GetRequiredService<IncrementalFileReader>(),sp.GetRequiredService<IProviderFileWatcherFactory>()));
