@@ -1,0 +1,2 @@
+MainPackage=C:\project\ai-usage-monitor-wt-task8\packaging\AIUsageMonitor.Package\bin\ARM64\Release\AIUsageMonitor.Package_0.1.0.0_ARM64.msix
+SymbolPackage=C:\project\ai-usage-monitor-wt-task8\packaging\AIUsageMonitor.Package\obj\ARM64\Release\Symbols\AIUsageMonitor.Package_0.1.0.0_ARM64.appxsym

@@ -14,3 +14,4 @@ TestResults/
 *.msixbundle
 *.appx
 *.appxbundle
+artifacts/
