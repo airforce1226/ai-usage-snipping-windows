@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22621.0</SupportedOSPlatformVersion>
+    <RootNamespace>AIUsageMonitor.App</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AIUsageMonitor.Core\AIUsageMonitor.Core.csproj" />
+    <ProjectReference Include="..\AIUsageMonitor.Ipc\AIUsageMonitor.Ipc.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\AIUsageMonitor.App\Services\**\*.cs" Link="Services\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\AIUsageMonitor.App\ViewModels\**\*.cs" Link="ViewModels\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,22 @@
+<Window x:Class="AIUsageMonitor.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="AI Usage Monitor">
+ <NavigationView x:Name="Navigation" IsBackButtonVisible="Collapsed" IsSettingsVisible="False"
+  SelectionChanged="OnSelectionChanged" Loaded="OnLoaded">
+  <NavigationView.MenuItems>
+   <NavigationViewItem Content="Summary" Tag="summary" Icon="Home" />
+   <NavigationViewItem Content="Projects" Tag="projects" Icon="Folder" />
+   <NavigationViewItem Content="Models" Tag="models" Icon="AllApps" />
+   <NavigationViewItem Content="Sessions" Tag="sessions" Icon="Library" />
+   <NavigationViewItem Content="Settings" Tag="settings" Icon="Setting" />
+  </NavigationView.MenuItems>
+  <NavigationView.Header>
+   <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <StackPanel><TextBlock Text="AI Usage Monitor" Style="{ThemeResource TitleTextBlockStyle}" />
+     <TextBlock x:Name="StatusText" Text="Connecting to Agent…" Opacity="0.7" /></StackPanel>
+    <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClick" />
+   </Grid>
+  </NavigationView.Header>
+  <Frame x:Name="ContentFrame" />
+ </NavigationView>
+</Window>
