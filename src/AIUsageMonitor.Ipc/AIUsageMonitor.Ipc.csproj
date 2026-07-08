@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <ProjectReference Include="..\AIUsageMonitor.Core\AIUsageMonitor.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="AIUsageMonitor.Ipc.Tests" />
   </ItemGroup>
   <PropertyGroup>

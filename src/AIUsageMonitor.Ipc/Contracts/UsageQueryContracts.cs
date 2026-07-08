@@ -10,6 +10,11 @@ public static class UsageQueryCommands
     public const string SessionsGet = "usage.sessions.get";
 }
 
+public static class CollectionCommands
+{
+    public const string Refresh = "collection.refresh";
+}
+
 public static class UsageQueryValidationErrorCodes
 {
     public const string InvalidRange = "usage.invalid_range";
