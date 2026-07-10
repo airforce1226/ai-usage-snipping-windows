@@ -8,6 +8,8 @@ Windows 11용 로컬 AI 사용량 모니터입니다. 백그라운드 Agent가 �
 - .NET 8 SDK
 - Visual Studio 2022 Build Tools with MSIX/Windows App SDK build support
 
+The dashboard is a framework-dependent WinUI 3 app. On a clean machine, the first development run can prompt to install the Windows App Runtime that matches the Windows App SDK version. Accept the prompt, or install the matching runtime from the Microsoft Windows App SDK downloads page before running the app.
+
 ## Run the dashboard during development
 
 ```powershell
