@@ -1,7 +1,7 @@
 # Windows Dashboard and CLI Design
 
-**Date:** 2026-07-08  
-**Status:** Approved  
+**Date:** 2026-07-08
+**Status:** Approved
 **Platform:** Windows 11 23H2 or later
 
 ## Goal
