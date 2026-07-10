@@ -24,6 +24,16 @@ public sealed class WinUiProjectTests
             Assert.Contains($"Tag=\"{tag}\"", xaml, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AppResources_IncludeWinUiControlResources()
+    {
+        XDocument app = XDocument.Load(Path.Combine(Root, "src", "AIUsageMonitor.App", "App.xaml"));
+
+        Assert.Contains(
+            app.Descendants(),
+            element => element.Name.LocalName == "XamlControlsResources");
+    }
+
     private static string FindRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
