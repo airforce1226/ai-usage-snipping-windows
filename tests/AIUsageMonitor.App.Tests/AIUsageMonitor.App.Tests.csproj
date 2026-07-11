@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AIUsageMonitor.App\AIUsageMonitor.App.csproj" />
+    <ProjectReference Include="..\..\src\AIUsageMonitor.App.Core\AIUsageMonitor.App.Core.csproj" />
   </ItemGroup>
 
 </Project>

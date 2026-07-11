@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AIUsageMonitor.Core\AIUsageMonitor.Core.csproj" />
     <ProjectReference Include="..\AIUsageMonitor.Infrastructure\AIUsageMonitor.Infrastructure.csproj" />
+    <ProjectReference Include="..\AIUsageMonitor.Ipc\AIUsageMonitor.Ipc.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

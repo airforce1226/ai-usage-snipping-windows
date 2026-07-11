@@ -1,9 +1,10 @@
 using System.IO.Pipes;
+using AIUsageMonitor.Ipc.Client;
 using AIUsageMonitor.Ipc.Contracts;
 
 namespace AIUsageMonitor.Ipc.Transport;
 
-public sealed class NamedPipeAgentClient
+public sealed class NamedPipeAgentClient : IAgentRequestClient
 {
     private readonly string pipeName;
 

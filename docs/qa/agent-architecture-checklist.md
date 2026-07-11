@@ -7,10 +7,13 @@
 - [x] A second in-process Agent guard cannot acquire the same user-scoped mutex.
 - [x] App connection retries and the three-restarts-per-ten-minutes limit pass under deterministic test doubles.
 - [x] CLI prefers Agent queries, falls back to read-only SQLite, and returns exit code 5 for unavailable mutations.
+- [x] WinUI dashboard project builds as a visible app shell with Summary, Projects, Models, Sessions, and Settings destinations.
+- [x] Dashboard ViewModels cover loading, stale/offline state, paging, refresh, navigation, and StartupTask state with automated tests.
 - [x] StartupTask remains disabled until explicit opt-in and exposes all returned states.
 - [x] Restart recovery resumes from the persisted checkpoint and inserts no duplicate events.
 - [x] Release x64 and ARM64 MSIX packages and an x64/ARM64 bundle build successfully.
 - [x] Both architecture packages contain App, Agent, CLI, and native `e_sqlite3.dll` files for Agent and CLI.
+- [x] README documents dashboard launch, CLI usage, MSIX packaging, and Agent-required refresh behavior.
 
 ## Controlled-environment verification still required
 

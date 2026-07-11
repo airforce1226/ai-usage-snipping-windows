@@ -14,5 +14,6 @@ TestResults/
 *.msixbundle
 *.appx
 *.appxbundle
+AppPackages/
 artifacts/
 BundleArtifacts/
